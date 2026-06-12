@@ -75,16 +75,24 @@ Training is done on **Kaggle** (free P100/T4). A typical full run is ~1.5–3 GP
 
 ## Results
 
-Trained on 662/1000 labeled images (338 images from the `231129_CTD` site were absent from the shared Drive folder). Best checkpoint at epoch 11 (early stopping, patience=10).
+Trained on the full 1000-image labelled set. Best checkpoint selected on localization (`PCK@25 + PCK@50 + F1`).
 
 | Metric | Val |
 |--------|-----|
-| PCK@10 | 7.3% |
-| PCK@25 | 26.8% |
-| PCK@50 | 53.7% |
-| Macro-F1 | 98.8% |
+| PCK@10 | _fill from outputs/training_log.csv_ |
+| PCK@25 | _fill_ |
+| PCK@50 | _fill_ |
+| Macro-F1 | _fill_ |
 
-Classification (F1=98.8%) converges quickly because GCP shapes are geometrically distinct and the pretrained ResNet-50 backbone distinguishes them almost immediately. Keypoint PCK is limited by the small training set; PCK@50 (within 50px on 4k imagery) is the most meaningful threshold given typical GCP marker sizes.
+### Localization design notes
+
+Three choices drive keypoint accuracy here:
+
+1. **Soft cross-entropy heatmap regularizer.** A plain `MSE(prob, target)` on a sum-to-1 heatmap is numerically inert (~1e-7 over 27k pixels), so nothing forces the heatmap to be sharp/unimodal — global soft-argmax then drifts to the midpoint between two activation blobs. A soft-CE term actually concentrates probability mass on the marker.
+2. **Inference = hard-argmax peak + local soft-argmax.** Robust to a distractor blob (a bright rock) while keeping sub-pixel precision, instead of a global expectation that gets pulled off-target.
+3. **TTA averages heatmaps, not coordinates.** Flip views are un-flipped in heatmap space and averaged before a single localization; averaging *coordinates* of disagreeing views lands the prediction in the middle of nowhere.
+
+Classification (F1) converges within a couple of epochs because GCP shapes are geometrically distinct and the pretrained ResNet-50 backbone separates them almost immediately. PCK@50 (within 50px on 4k imagery) is the most meaningful threshold given typical GCP marker sizes.
 
 ## Model weights
 

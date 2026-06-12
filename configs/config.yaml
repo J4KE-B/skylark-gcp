@@ -19,15 +19,15 @@ model:
 
 training:
   batch_size: 12
-  num_epochs: 40
+  num_epochs: 60
   lr: 1.0e-4
   weight_decay: 1.0e-4
   val_frac: 0.15
   seed: 42
   kp_loss_weight: 1.0
   cls_loss_weight: 0.5
-  dsnt_reg_weight: 1.0
-  patience: 10
+  dsnt_reg_weight: 0.1   # soft-CE heatmap regularizer; ~1.0 contribution early, decays as it sharpens
+  patience: 15
   num_workers: 2
 
 predict:

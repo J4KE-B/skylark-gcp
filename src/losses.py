@@ -19,7 +19,12 @@ class GCPLoss(nn.Module):
         if self.kp_head == "heatmap":
             coords, prob = softargmax2d(kp_out)
             coord_loss = F.mse_loss(coords, batch["kp_norm"])
-            reg = F.mse_loss(prob, batch["heatmap"])
+            # Distribution regularizer: soft cross-entropy between the predicted heatmap
+            # probability and the target Gaussian. The previous MSE(prob, target) was
+            # numerically inert (~1e-7 on a sum-to-1 map over 27k pixels), so nothing pushed
+            # the heatmap to be sharp/unimodal — letting soft-argmax drift to the midpoint
+            # between two blobs (the catastrophic misses). CE actually concentrates the mass.
+            reg = -(batch["heatmap"] * prob.clamp_min(1e-12).log()).sum(dim=(1, 2, 3)).mean()
             kp_loss = coord_loss + self.reg_weight * reg
         else:
             kp_loss = F.l1_loss(kp_out, (batch["kp_norm"] + 1.0) / 2.0)

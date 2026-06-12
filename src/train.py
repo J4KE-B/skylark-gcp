@@ -109,7 +109,10 @@ def train(config_path):
         tr = run_epoch(model, train_loader, criterion, opt, device, cfg, True)
         va = run_epoch(model, val_loader, criterion, None, device, cfg, False)
         sched.step()
-        score = va["pck10"] + va["f1"]
+        # Select on localization (the weak head). F1 saturates early and is near-constant,
+        # so including it with equal weight let its noise pick the checkpoint and discard the
+        # best-localizing epoch. pck25+pck50 actually vary; +f1 only breaks ties.
+        score = va["pck25"] + va["pck50"] + va["f1"]
         rows.append({"epoch": ep, **{f"train_{k}": v for k, v in tr.items()},
                      **{f"val_{k}": v for k, v in va.items()}})
         print(f"Ep{ep:3d} val loss={va['loss']:.3f} PCK10={va['pck10']:.3f} "
