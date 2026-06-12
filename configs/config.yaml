@@ -1,0 +1,34 @@
+paths:
+  label_file: "data/gcp_marks.json"
+  train_dir: "data/train_dataset"
+  test_dir: "data/test_dataset"
+  output_dir: "outputs"
+
+classes: ["Cross", "Square", "L-Shape"]
+
+input:
+  width: 768          # letterbox canvas W (multiple of 32)
+  height: 576         # letterbox canvas H (multiple of 32, ~4:3)
+  heatmap_stride: 4   # heatmap is input/4 → 192x144
+
+model:
+  backbone: "resnet50"
+  pretrained: true
+  kp_head: "heatmap"  # "heatmap" (DSNT, default) or "regression" (fallback)
+  dropout: 0.3
+
+training:
+  batch_size: 12
+  num_epochs: 40
+  lr: 1.0e-4
+  weight_decay: 1.0e-4
+  val_frac: 0.15
+  seed: 42
+  kp_loss_weight: 1.0
+  cls_loss_weight: 0.5
+  dsnt_reg_weight: 1.0
+  patience: 10
+  num_workers: 2
+
+predict:
+  tta: true

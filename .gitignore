@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Virtual envs
+venv/
+.venv/
+env/
+
+# Data — downloaded on Kaggle, never committed (GBs of drone imagery)
+data/
+
+# Model weights — large; share via Drive link, do not commit
+*.pt
+*.pth
+
+# Agent / skill scaffolding — kept locally, never committed
+.agents/
+.planning/
+
+# OS
+.DS_Store
