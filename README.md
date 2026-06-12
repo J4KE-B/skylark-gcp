@@ -75,13 +75,17 @@ Training is done on **Kaggle** (free P100/T4). A typical full run is ~1.5–3 GP
 
 ## Results
 
-| Metric | Value |
-|--------|-------|
-| PCK@10 | _fill from outputs/training_log.csv_ |
-| PCK@25 | _fill_ |
-| PCK@50 | _fill_ |
-| Macro-F1 | _fill_ |
+Trained on 662/1000 labeled images (338 images from the `231129_CTD` site were absent from the shared Drive folder). Best checkpoint at epoch 11 (early stopping, patience=10).
+
+| Metric | Val |
+|--------|-----|
+| PCK@10 | 7.3% |
+| PCK@25 | 26.8% |
+| PCK@50 | 53.7% |
+| Macro-F1 | 98.8% |
+
+Classification (F1=98.8%) converges quickly because GCP shapes are geometrically distinct and the pretrained ResNet-50 backbone distinguishes them almost immediately. Keypoint PCK is limited by the small training set; PCK@50 (within 50px on 4k imagery) is the most meaningful threshold given typical GCP marker sizes.
 
 ## Model weights
 
-`outputs/best.pt` — _add shareable Drive link after training._
+`outputs/best.pt` — [Download from Google Drive](https://drive.google.com/file/d/1r9-lNvp1gcgKCrLEnOdgPVaU373_oIBJ/view?usp=drive_link)
