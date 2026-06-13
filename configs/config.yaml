@@ -29,6 +29,8 @@ training:
   dsnt_reg_weight: 0.1   # soft-CE heatmap regularizer; ~1.0 contribution early, decays as it sharpens
   patience: 15
   num_workers: 2
+  crop_epochs: 30        # stage-2 crop classifier (shape from a high-res crop around the marker)
+  crop_batch_size: 32
 
 predict:
   tta: true

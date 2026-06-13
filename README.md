@@ -8,7 +8,7 @@ A dual-head CNN that, given a full-resolution aerial drone image, predicts the *
 
 **Keypoint head — DSNT / soft-argmax:** a light decoder produces a single-channel heatmap at stride 4; a differentiable soft-argmax reads off a sub-pixel (x, y). Trained on a coordinate (MSE) loss plus a heatmap-distribution regularizer. This beats direct coordinate regression for tight-threshold PCK.
 
-**Classification head:** global-pooled encoder bottleneck → dropout → linear(3).
+**Classification — two-stage.** GCP markers are ~35 px in a 4096 px frame; letterboxed to 768 px and run through a stride-32 encoder, the marker becomes *sub-pixel* on the feature map, so a whole-image classifier can't read its shape (it ends up keying on terrain/site instead). So shape is decided in a second stage: the keypoint model locates the marker, then a **high-res crop** (~10% of the image, centered on the predicted point) is fed to a small **ResNet-18 classifier** ([`crop_model.py`](src/crop_model.py)) that sees the marker in full detail. The crop classifier is trained on GT-centered crops with jitter (so it tolerates localization error) and applied flip-TTA at inference. The whole-image model still has a (heatmap-attention-pooled) classification head as a one-stage fallback.
 
 A `regression` keypoint head (linear→sigmoid + Wing-style L1) is available via `model.kp_head` as a fallback/ablation; default is `heatmap`.
 
@@ -50,10 +50,13 @@ data/
 
 ```bash
 # Train (GPU strongly recommended — use Kaggle; see notebooks/kaggle_train.ipynb)
-python train.py --config configs/config.yaml
+python train.py --config configs/config.yaml          # stage 1: keypoint + coarse shape
+python train_crop.py --config configs/config.yaml     # stage 2: high-res crop shape classifier
 
 # Inference -> predictions.json (mirrors the label schema exactly)
-python predict.py --config configs/config.yaml --checkpoint outputs/best.pt --output predictions.json
+python predict.py --config configs/config.yaml --checkpoint outputs/best.pt \
+    --crop-checkpoint outputs/best_crop.pt --output predictions.json
+# (omit --crop-checkpoint to use the one-stage whole-image classifier)
 ```
 
 `predictions.json` format:
@@ -65,8 +68,9 @@ python predict.py --config configs/config.yaml --checkpoint outputs/best.pt --ou
 ## Tests
 
 ```bash
-python -m pytest -q     # 17 unit tests: config, letterbox round-trip, no-leakage split,
-                        # dataset contract, model shapes, soft-argmax, losses, metrics, predict schema
+python -m pytest -q     # 21 unit tests: config, letterbox round-trip, no-leakage split,
+                        # dataset contract, model shapes, soft-argmax, losses, metrics,
+                        # predict schema, crop classifier + crop-box geometry
 ```
 
 ## Notes on compute

@@ -1,11 +1,15 @@
 import json
+from pathlib import Path
 
+import cv2
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from src.config import load_config
+from src.crop_dataset import crop_box, crop_size_for, crop_val_tf
+from src.crop_model import CropClassifier
 from src.dataset import GCPTestDataset
 from src.model import GCPModel, softargmax2d
 from src.transforms import get_val_transform
@@ -14,6 +18,36 @@ from src.metrics import coords_norm_to_orig_px
 
 def format_prediction(x, y, shape):
     return {"mark": {"x": round(float(x), 2), "y": round(float(y), 2)}, "verified_shape": shape}
+
+
+def reclassify_with_crops(preds, cfg, crop_checkpoint, device, batch_size=32):
+    """Stage 2: re-read each test image at full resolution, crop around the predicted (x, y),
+    and classify the shape from that high-detail crop (flip-TTA averaged). Overwrites the
+    coarse whole-image shape; the keypoint (x, y) is kept as-is."""
+    model = CropClassifier(len(cfg.classes), pretrained=False, dropout=cfg.model.dropout).to(device)
+    ck = torch.load(crop_checkpoint, map_location=device)
+    model.load_state_dict(ck["model_state"]); model.eval()
+    tf = crop_val_tf()
+    root = Path(cfg.paths.test_dir)
+    keys = list(preds.keys())
+    with torch.no_grad():
+        for i in tqdm(range(0, len(keys), batch_size), desc="crop-cls"):
+            chunk = keys[i:i + batch_size]
+            tensors = []
+            for k in chunk:
+                img = cv2.cvtColor(cv2.imread(str(root / k)), cv2.COLOR_BGR2RGB)
+                h, w = img.shape[:2]
+                size = crop_size_for(h, w)
+                x0, y0, x1, y1 = crop_box(h, w, preds[k]["mark"]["x"], preds[k]["mark"]["y"], size)
+                tensors.append(tf(image=img[y0:y1, x0:x1])["image"])
+            xb = torch.stack(tensors).to(device)
+            prob = (F.softmax(model(xb), 1)
+                    + F.softmax(model(torch.flip(xb, [3])), 1)
+                    + F.softmax(model(torch.flip(xb, [2])), 1))
+            idx = prob.argmax(1).cpu()
+            for j, k in enumerate(chunk):
+                preds[k]["verified_shape"] = cfg.idx_to_class[idx[j].item()]
+    return preds
 
 
 def _coords_from_output(kp_out, kp_head):
@@ -49,7 +83,7 @@ def peak_soft_refine(prob, window=5):
     return coords
 
 
-def predict(config_path, checkpoint_path, output_path="predictions.json"):
+def predict(config_path, checkpoint_path, output_path="predictions.json", crop_checkpoint=None):
     cfg = load_config(config_path)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = GCPModel(len(cfg.classes), False, cfg.model.kp_head, cfg.model.dropout,
@@ -102,6 +136,9 @@ def predict(config_path, checkpoint_path, output_path="predictions.json"):
                                                 (b["pad"][i][0].item(), b["pad"][i][1].item()))
                 preds[b["path"][i]] = format_prediction(ox.item(), oy.item(),
                                                         cfg.idx_to_class[cls_idx[i].item()])
+    if crop_checkpoint:
+        print("Stage 2: reclassifying shapes from high-res crops...")
+        preds = reclassify_with_crops(preds, cfg, crop_checkpoint, device)
     json.dump(preds, open(output_path, "w"), indent=2)
     print(f"wrote {len(preds)} predictions -> {output_path}")
     return preds
