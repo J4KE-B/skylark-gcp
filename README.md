@@ -75,14 +75,14 @@ Training is done on **Kaggle** (free P100/T4). A typical full run is ~1.5–3 GP
 
 ## Results
 
-Trained on the full 1000-image labelled set. Best checkpoint selected on localization (`PCK@25 + PCK@50 + F1`).
+Trained on the full 1000-image labelled set. Best checkpoint selected on localization (`PCK@25 + PCK@50 + F1`), epoch 22.
 
 | Metric | Val |
 |--------|-----|
-| PCK@10 | _fill from outputs/training_log.csv_ |
-| PCK@25 | _fill_ |
-| PCK@50 | _fill_ |
-| Macro-F1 | _fill_ |
+| PCK@10 | 15.1% |
+| PCK@25 | 42.8% |
+| PCK@50 | 57.2% |
+| Macro-F1 | 96.4% |
 
 ### Localization design notes
 
