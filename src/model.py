@@ -23,10 +23,6 @@ class GCPModel(nn.Module):
         base = resnet50(weights=weights)
         self.encoder = nn.Sequential(*list(base.children())[:-2])  # (B,2048,H/32,W/32)
         self.kp_head = kp_head
-        self.cls_head = nn.Sequential(
-            nn.AdaptiveAvgPool2d(1), nn.Flatten(),
-            nn.Dropout(dropout), nn.Linear(2048, num_classes),
-        )
         if kp_head == "heatmap":
             up = 32 // heatmap_stride  # /32 feature -> /stride heatmap
             self.kp_decoder = nn.Sequential(
@@ -34,15 +30,32 @@ class GCPModel(nn.Module):
                 nn.Upsample(scale_factor=up, mode="bilinear", align_corners=False),
                 nn.Conv2d(256, 1, 1),
             )
+            # Heatmap-guided classification: pool encoder features AT the marker (attention by
+            # the predicted heatmap) and concat with global context. Global-only pooling let a
+            # ~35px marker get drowned out by the whole scene, so the classifier read terrain,
+            # not the marker shape. This forces it to look where the keypoint is.
+            self.cls_head = nn.Sequential(
+                nn.Dropout(dropout), nn.Linear(2048 * 2, num_classes),
+            )
         else:
+            self.cls_head = nn.Sequential(
+                nn.AdaptiveAvgPool2d(1), nn.Flatten(),
+                nn.Dropout(dropout), nn.Linear(2048, num_classes),
+            )
             self.kp_reg = nn.Sequential(
                 nn.AdaptiveAvgPool2d(1), nn.Flatten(),
                 nn.Dropout(dropout), nn.Linear(2048, 2), nn.Sigmoid(),
             )
 
     def forward(self, x):
-        feat = self.encoder(x)
-        cls = self.cls_head(feat)
+        feat = self.encoder(x)                                 # (B,2048,h,w)
         if self.kp_head == "heatmap":
-            return self.kp_decoder(feat), cls
-        return self.kp_reg(feat), cls
+            hm = self.kp_decoder(feat)                         # (B,1,Hh,Wh)
+            b, c, h, w = feat.shape
+            attn = F.interpolate(hm, size=(h, w), mode="bilinear", align_corners=False)
+            attn = F.softmax(attn.view(b, 1, -1), dim=2).view(b, 1, h, w)
+            local = (feat * attn).sum(dim=(2, 3))              # marker-focused (B,2048)
+            glob = feat.mean(dim=(2, 3))                       # global context (B,2048)
+            cls = self.cls_head(torch.cat([glob, local], dim=1))
+            return hm, cls
+        return self.kp_reg(feat), self.cls_head(feat)

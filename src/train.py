@@ -25,8 +25,12 @@ def set_seed(seed):
 def class_weights_from(samples, num_classes):
     counts = Counter(c for _, _, _, c, _ in samples)
     total = sum(counts.values())
-    return torch.tensor([total / (num_classes * max(1, counts.get(i, 0)))
-                         for i in range(num_classes)], dtype=torch.float32)
+    # Softened inverse-frequency (sqrt) weights, normalized to mean 1. Full inverse frequency
+    # over-weights the rare L-Shape class so hard the model over-predicts it; sqrt tempers that
+    # while still counter-balancing imbalance.
+    raw = [(total / (num_classes * max(1, counts.get(i, 0)))) ** 0.5 for i in range(num_classes)]
+    mean_w = sum(raw) / len(raw)
+    return torch.tensor([r / mean_w for r in raw], dtype=torch.float32)
 
 
 def _gt_orig_px(b, cfg):
