@@ -27,5 +27,5 @@ def test_crop_box_centered_when_room():
 
 
 def test_crop_size_clamped():
-    assert crop_size_for(4000, 4000) <= 512
-    assert crop_size_for(400, 400) >= 256
+    assert crop_size_for(4000, 4000) <= 300   # tight crop so the marker dominates
+    assert crop_size_for(400, 400) >= 180

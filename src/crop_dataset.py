@@ -13,10 +13,11 @@ _MEAN = (0.485, 0.456, 0.406)
 _STD = (0.229, 0.224, 0.225)
 
 
-def crop_size_for(h, w, frac=0.10, lo=256, hi=512):
-    """Side length of the square crop, ~10% of the larger image dimension, clamped. Big enough
-    to still contain the marker when localization is a bit off, small enough that the marker
-    fills a useful fraction of the crop."""
+def crop_size_for(h, w, frac=0.06, lo=180, hi=300):
+    """Side length of the square crop, ~6% of the larger image dimension, clamped. Kept TIGHT
+    so the ~80px marker fills a large fraction of the crop — a loose crop lets the classifier
+    memorize surrounding terrain (the site-overfitting leak) instead of reading the shape.
+    Still wide enough to contain the marker given typical localization error."""
     return int(min(hi, max(lo, frac * max(h, w))))
 
 
@@ -81,7 +82,7 @@ class GCPCropDataset(Dataset):
     stride); a crop preserves the marker's detail. Training jitters the crop center so the
     classifier tolerates the localization error it sees at inference (predicted, not GT, center)."""
 
-    def __init__(self, samples, root_dir, transform, crop_frac=0.10, jitter=0.15, train=True):
+    def __init__(self, samples, root_dir, transform, crop_frac=0.06, jitter=0.20, train=True):
         self.samples = samples
         self.root = Path(root_dir)
         self.transform = transform

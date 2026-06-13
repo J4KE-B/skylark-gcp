@@ -41,11 +41,17 @@ def train_crop(config_path):
     Path(cfg.paths.output_dir).mkdir(parents=True, exist_ok=True)
 
     samples = build_samples(cfg.paths.label_file, cfg.paths.train_dir, cfg.class_to_idx)
-    tr_idx, va_idx = group_stratified_split([(g, c) for _, _, _, c, g in samples],
-                                            cfg.training.val_frac, cfg.training.seed)
+    # Split by SITE (first path component), not GCP folder: shape classification must generalize
+    # to unseen sites. A per-GCP-folder split leaves the same sites in train and val, so the
+    # classifier scores ~perfectly by memorizing site/terrain and then collapses on new sites.
+    site_groups = [(rel.split("/")[0], c) for rel, _, _, c, _ in samples]
+    tr_idx, va_idx = group_stratified_split(site_groups, cfg.training.val_frac, cfg.training.seed)
     tr_samples = [samples[i] for i in tr_idx]
     va_samples = [samples[i] for i in va_idx]
-    print(f"crop train/val = {len(tr_samples)}/{len(va_samples)}")
+    n_tr_sites = len({samples[i][0].split('/')[0] for i in tr_idx})
+    n_va_sites = len({samples[i][0].split('/')[0] for i in va_idx})
+    print(f"crop train/val = {len(tr_samples)}/{len(va_samples)} "
+          f"({n_tr_sites} train sites, {n_va_sites} val sites, no overlap)")
 
     train_ds = GCPCropDataset(tr_samples, cfg.paths.train_dir, crop_train_tf(), train=True)
     val_ds = GCPCropDataset(va_samples, cfg.paths.train_dir, crop_val_tf(), train=False)
