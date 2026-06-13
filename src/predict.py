@@ -20,10 +20,10 @@ def format_prediction(x, y, shape):
     return {"mark": {"x": round(float(x), 2), "y": round(float(y), 2)}, "verified_shape": shape}
 
 
-def reclassify_with_crops(preds, cfg, crop_checkpoint, device, batch_size=32):
+def reclassify_with_crops(preds, conf, cfg, crop_checkpoint, device, batch_size=32):
     """Stage 2: re-read each test image at full resolution, crop around the predicted (x, y),
     and classify the shape from that high-detail crop (flip-TTA averaged). Overwrites the
-    coarse whole-image shape; the keypoint (x, y) is kept as-is."""
+    coarse whole-image shape and records the shape confidence; the keypoint (x, y) is kept."""
     model = CropClassifier(len(cfg.classes), pretrained=False, dropout=cfg.model.dropout).to(device)
     ck = torch.load(crop_checkpoint, map_location=device)
     model.load_state_dict(ck["model_state"]); model.eval()
@@ -43,10 +43,11 @@ def reclassify_with_crops(preds, cfg, crop_checkpoint, device, batch_size=32):
             xb = torch.stack(tensors).to(device)
             prob = (F.softmax(model(xb), 1)
                     + F.softmax(model(torch.flip(xb, [3])), 1)
-                    + F.softmax(model(torch.flip(xb, [2])), 1))
-            idx = prob.argmax(1).cpu()
+                    + F.softmax(model(torch.flip(xb, [2])), 1)) / 3.0
+            top = prob.max(1)
             for j, k in enumerate(chunk):
-                preds[k]["verified_shape"] = cfg.idx_to_class[idx[j].item()]
+                preds[k]["verified_shape"] = cfg.idx_to_class[top.indices[j].item()]
+                conf[k]["shape"] = round(top.values[j].item(), 4)
     return preds
 
 
@@ -83,6 +84,22 @@ def peak_soft_refine(prob, window=5):
     return coords
 
 
+def peak_concentration(prob, window=7):
+    """Localization confidence: fraction of heatmap probability mass within a window around the
+    argmax peak. ~1.0 = one sharp marker (confident); low = diffuse/competing blobs (the model
+    is unsure where the marker is — often a distractor grab or no clear marker). Returns (B,)."""
+    b, _, h, w = prob.shape
+    idx = prob.view(b, -1).argmax(dim=1)
+    py = (idx // w).long(); px = (idx % w).long()
+    r = window // 2
+    out = torch.empty(b, device=prob.device)
+    for i in range(b):
+        y0, y1 = int(max(0, py[i] - r)), int(min(h, py[i] + r + 1))
+        x0, x1 = int(max(0, px[i] - r)), int(min(w, px[i] + r + 1))
+        out[i] = prob[i, 0, y0:y1, x0:x1].sum()
+    return out
+
+
 def predict(config_path, checkpoint_path, output_path="predictions.json", crop_checkpoint=None):
     cfg = load_config(config_path)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -96,6 +113,7 @@ def predict(config_path, checkpoint_path, output_path="predictions.json", crop_c
     loader = DataLoader(ds, batch_size=cfg.training.batch_size, shuffle=False,
                         num_workers=cfg.training.num_workers)
     preds = {}
+    conf = {}
     with torch.no_grad():
         for b in tqdm(loader, desc="infer"):
             img = b["image"].to(device)
@@ -124,21 +142,31 @@ def predict(config_path, checkpoint_path, output_path="predictions.json", crop_c
                         coords = coords * torch.tensor([1.0, -1.0], device=device)
                     kp_acc.append(coords)
                 cls_acc.append(torch.softmax(cls_logits, dim=1))
+            cls_prob = torch.stack(cls_acc).mean(0)
+            cls_top = cls_prob.max(1)
             if heatmap_head:
                 prob_mean = torch.stack(kp_acc).mean(0)        # average heatmaps, then localize once
                 coords = peak_soft_refine(prob_mean).cpu()
+                loc_conf = peak_concentration(prob_mean).cpu()
             else:
                 coords = torch.stack(kp_acc).mean(0).cpu()
-            cls_idx = torch.stack(cls_acc).mean(0).argmax(1).cpu()
+                loc_conf = torch.ones(img.size(0))             # regression head has no heatmap
             for i in range(img.size(0)):
                 ox, oy = coords_norm_to_orig_px(coords[i:i + 1], cfg.input.width, cfg.input.height,
                                                 b["scale"][i].item(),
                                                 (b["pad"][i][0].item(), b["pad"][i][1].item()))
-                preds[b["path"][i]] = format_prediction(ox.item(), oy.item(),
-                                                        cfg.idx_to_class[cls_idx[i].item()])
+                path = b["path"][i]
+                preds[path] = format_prediction(ox.item(), oy.item(),
+                                                cfg.idx_to_class[cls_top.indices[i].item()])
+                conf[path] = {"loc": round(loc_conf[i].item(), 4),
+                              "shape": round(cls_top.values[i].item(), 4)}
     if crop_checkpoint:
         print("Stage 2: reclassifying shapes from high-res crops...")
-        preds = reclassify_with_crops(preds, cfg, crop_checkpoint, device)
+        preds = reclassify_with_crops(preds, conf, cfg, crop_checkpoint, device)
     json.dump(preds, open(output_path, "w"), indent=2)
     print(f"wrote {len(preds)} predictions -> {output_path}")
+    # Confidence is written to a SEPARATE file so predictions.json keeps the exact label schema.
+    conf_path = str(Path(output_path).with_name("confidences.json"))
+    json.dump(conf, open(conf_path, "w"), indent=2)
+    print(f"wrote confidences -> {conf_path} (loc = heatmap sharpness, shape = classifier prob)")
     return preds
